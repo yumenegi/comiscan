@@ -28,7 +28,9 @@ The panel follows your browser language by default. Use the **日本語 / Englis
 ## Usage
 1. Open your Twitter/X following page.
 ![Following](assets/following.png)
-2. Click scan and wait!
+2. Set the current Comiket number. At the time of writing, it is C109.
+![Set Number](assets/set.png)
+3. Click scan and wait!
 ![Scan](assets/scan.png)
 
 ---
@@ -51,5 +53,7 @@ ComiScanは、X（旧Twitter）のフォロー一覧を自動でスクロール�
 ## 使い方
 1. X のフォロー一覧ページを開きます。
 ![フォロー一覧](assets/following.png)
-2. 「スキャン」をクリックして待ちます！
+2. 今回のコミケの回数を入力します。執筆時点ではC109です。
+![回数を入力](assets/set.png)
+3. 「スキャン」をクリックして待ちます！
 ![スキャン](assets/scan-ja.png)

@@ -4,7 +4,7 @@
 // @description  Scan your X following page for artists announcing Comiket participation
 // @description:ja フォロー一覧をスキャンして、コミケ参加を告知しているアーティストを探します
 // @namespace    comiscan
-// @version      2.0
+// @version      2.1
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @run-at       document-start
@@ -20,7 +20,8 @@
 
   const DEFAULT_EVENT = 109; // Comiket number used until you change it in the panel
   const SCROLL_SPEED = 5000; // px per second of smooth scrolling (lower if X rate-limits you)
-  const STALL_SECONDS = 10;  // stop after this long with no new accounts
+  const STALL_SECONDS = 10;  // fallback: stop after this long with no new accounts
+  const END_GRACE_MS = 1500; // stop once at the bottom with nothing loading for this long
 
   // =========================================================================
   // Matching
@@ -178,13 +179,31 @@
   const users = new Map(); // lowercase handle -> {screen_name, name, location, description, src}
 
   // 1) X's own API responses for the following timeline: full profile incl. location.
+  // `pending` counts following-list requests still in flight, so the scanner
+  // can tell "waiting for the next page" apart from "reached the end".
+  let pending = 0;
+  const done = () => { pending = Math.max(0, pending - 1); };
+
   const origFetch = window.fetch;
   window.fetch = async function (...args) {
-    const res = await origFetch.apply(this, args);
+    let track = false;
     try {
       const url = typeof args[0] === "string" ? args[0] : args[0]?.url ?? String(args[0]);
-      if (isTarget(url)) res.clone().json().then(ingest).catch(() => {});
+      track = isTarget(url);
     } catch {}
+    if (track) pending++;
+    let res;
+    try {
+      res = await origFetch.apply(this, args);
+    } catch (e) {
+      if (track) done();
+      throw e;
+    }
+    if (track) {
+      let p;
+      try { p = res.clone().json().then(ingest); } catch { p = Promise.resolve(); }
+      p.catch(() => {}).finally(done);
+    }
     return res;
   };
 
@@ -196,6 +215,8 @@
   };
   XMLHttpRequest.prototype.send = function (...args) {
     if (isTarget(this.__comiketScanUrl)) {
+      pending++;
+      this.addEventListener("loadend", done, { once: true });
       this.addEventListener("load", () => {
         try {
           if (this.responseType === "json") ingest(this.response);
@@ -272,11 +293,72 @@
   }
 
   // =========================================================================
+  // Interface language
+  // =========================================================================
+
+  const STRINGS = {
+    en: {
+      scan: "Scan",
+      stop: "Stop",
+      copyCsv: "Copy CSV",
+      downloadCsv: "Download CSV",
+      copied: "Copied ✓",
+      copyFailed: "Copy failed",
+      idle: "Idle",
+      scanning: "Scanning… ",
+      done: "Done. ",
+      summary: (seen, matches) => `${seen} accounts seen, ${matches} matches`,
+      noSpace: "(no space yet)",
+      eventTitle: "Comiket number to scan for",
+      langToggle: "日本語",
+      langTitle: "Switch interface to Japanese",
+      status: { confirmed: "", likely: "no C# yet", announced: "no space yet", "not-attending": "落選/不参加" },
+    },
+    ja: {
+      scan: "スキャン",
+      stop: "停止",
+      copyCsv: "CSVをコピー",
+      downloadCsv: "CSVをダウンロード",
+      copied: "コピーしました ✓",
+      copyFailed: "コピー失敗",
+      idle: "待機中",
+      scanning: "スキャン中… ",
+      done: "完了。",
+      summary: (seen, matches) => `${seen}件のアカウントを確認、${matches}件が該当`,
+      noSpace: "（スペース未定）",
+      eventTitle: "スキャン対象のコミケ回数",
+      langToggle: "English",
+      langTitle: "Switch interface to English",
+      status: { confirmed: "", likely: "回数の記載なし", announced: "スペース未定", "not-attending": "落選/不参加" },
+    },
+  };
+
+  const LANG_KEY = "comiketScan.lang";
+  let lang = loadLang();
+  const t = () => STRINGS[lang];
+
+  function loadLang() {
+    try {
+      const saved = localStorage.getItem(LANG_KEY);
+      if (saved in STRINGS) return saved;
+    } catch {}
+    return /^ja\b/i.test(navigator.language || "") ? "ja" : "en";
+  }
+
+  function toggleLang() {
+    lang = lang === "ja" ? "en" : "ja";
+    try { localStorage.setItem(LANG_KEY, lang); } catch {}
+    const scrollTop = panel?.scrollTop ?? 0;
+    panel?.remove();
+    buildPanel();
+    panel.scrollTop = scrollTop;
+  }
+
+  // =========================================================================
   // Results
   // =========================================================================
 
   const SHOWN = ["confirmed", "likely", "announced", "not-attending"];
-  const STATUS_LABEL = { confirmed: "", likely: "no C# yet", announced: "no space yet", "not-attending": "落選/不参加" };
   const STATUS_COLOR = { confirmed: "#00ba7c", likely: "#1d9bf0", announced: "#ffd400", "not-attending": "#f4212e" };
 
   function analyze() {
@@ -324,9 +406,9 @@
   async function copyCsv(btn) {
     try {
       await navigator.clipboard.writeText(toCSV(lastRows));
-      flash(btn, "Copied ✓");
+      flash(btn, t().copied);
     } catch {
-      flash(btn, "Copy failed");
+      flash(btn, t().copyFailed);
     }
   }
 
@@ -365,7 +447,7 @@
     input.inputMode = "numeric";
     input.maxLength = 3;
     input.value = event;
-    input.title = "Comiket number to scan for";
+    input.title = t().eventTitle;
     input.oninput = () => {
       const n = Number(input.value);
       if (/^\d{3}$/.test(input.value) && n !== event) setEvent(n);
@@ -376,17 +458,22 @@
   }
 
   function buildPanel() {
-    statusEl = el("div", "margin:6px 0;color:#8899a6", "Idle");
+    statusEl = el("div", "margin:6px 0;color:#8899a6", t().idle);
+    const langBtn = el("button",
+      "float:right;font:inherit;font-size:11px;font-weight:normal;padding:1px 8px;border-radius:999px;" +
+      "cursor:pointer;border:1px solid #536471;background:transparent;color:#8899a6", t().langToggle);
+    langBtn.title = t().langTitle;
+    langBtn.onclick = toggleLang;
     listEl = el("div");
     panel = el("div",
       "position:fixed;top:12px;right:12px;z-index:99999;width:380px;max-height:80vh;" +
       "overflow:auto;background:#15202b;color:#fff;border:1px solid #38444d;border-radius:12px;" +
       "padding:12px;font:13px/1.4 sans-serif;box-shadow:0 4px 20px #0008",
-      el("div", "font-weight:bold;margin-bottom:6px", "C", eventInput(), " ComiScan"),
-      button("Scan", run),
-      button("Stop", () => { running = false; }),
-      button("Copy CSV", copyCsv),
-      button("Download CSV", download),
+      el("div", "font-weight:bold;margin-bottom:6px", langBtn, "C", eventInput(), " ComiScan"),
+      button(t().scan, run),
+      button(t().stop, () => { running = false; }),
+      button(t().copyCsv, copyCsv),
+      button(t().downloadCsv, download),
       statusEl,
       listEl,
     );
@@ -404,7 +491,7 @@
     if (!panel) return;
     lastRows = analyze();
     statusEl.textContent =
-      `${running ? "Scanning… " : users.size ? "Done. " : ""}${users.size} accounts seen, ${lastRows.length} matches`;
+      `${running ? t().scanning : users.size ? t().done : ""}${t().summary(users.size, lastRows.length)}`;
     listEl.replaceChildren();
     for (const r of lastRows) {
       const a = el("a", "color:#1d9bf0;text-decoration:none", `@${r.handle}`);
@@ -414,8 +501,8 @@
         el("b", "", `${r.name} `), a);
       const where = el("div", "color:#c4cfd6;padding-left:1.1em",
         `${r.day ? "[" + r.day + "] " : ""}`,
-        r.space || "(no space yet)",
-        STATUS_LABEL[r.status] ? el("span", "color:#8899a6", ` · ${STATUS_LABEL[r.status]}`) : "",
+        r.space || t().noSpace,
+        t().status[r.status] ? el("span", "color:#8899a6", ` · ${t().status[r.status]}`) : "",
         r.tags ? el("span", "color:#8899a6", ` · ${r.tags}`) : "");
       listEl.append(el("div", "padding:3px 0;border-top:1px solid #263340", artist, where));
     }
@@ -429,12 +516,16 @@
     let lastNew = prev;
     let lastCollect = 0;
     let lastRender = 0;
+    let bottomSince = null;
 
     await new Promise((resolve) => {
       function frame(now) {
         if (!running) return resolve();
         // rAF pauses in background tabs; don't count that pause as a stall
-        if (now - prev > 1000) lastNew += now - prev;
+        if (now - prev > 1000) {
+          lastNew += now - prev;
+          if (bottomSince !== null) bottomSince += now - prev;
+        }
         const dt = Math.min(now - prev, 100);
         prev = now;
         window.scrollBy({ top: (SCROLL_SPEED * dt) / 1000, behavior: "instant" });
@@ -444,6 +535,16 @@
         if (users.size > lastSize) { lastSize = users.size; lastNew = now; }
         if (now - lastRender > 500) { render(); lastRender = now; }
         if (now - lastNew > STALL_SECONDS * 1000) return resolve();
+
+        // End of list: can't scroll further and X isn't fetching another page.
+        const root = document.scrollingElement || document.documentElement;
+        const atBottom = window.innerHeight + window.scrollY >= root.scrollHeight - 4;
+        if (atBottom && pending === 0) {
+          if (bottomSince === null) bottomSince = now;
+          else if (now - bottomSince > END_GRACE_MS) return resolve();
+        } else {
+          bottomSince = null;
+        }
         requestAnimationFrame(frame);
       }
       requestAnimationFrame(frame);

@@ -1,0 +1,5 @@
+cookies.json
+followings.json
+*.csv
+__pycache__/
+comiscan-old.js

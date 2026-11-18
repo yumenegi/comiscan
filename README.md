@@ -52,4 +52,4 @@ ComiScanは、X（旧Twitter）のフォロー一覧を自動でスクロール�
 1. X のフォロー一覧ページを開きます。
 ![フォロー一覧](assets/following.png)
 2. 「スキャン」をクリックして待ちます！
-![スキャン](assets/scan.png)
+![スキャン](assets/scan-ja.png)

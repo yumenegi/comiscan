@@ -7,7 +7,10 @@ ComiScan is a Tampermonkey script that scrolls through your Twitter/X following 
 2. [Click here to install the script from the repo.](https://raw.githubusercontent.com/yumenegi/comiscan/main/comiscan.user.js)
 3. This page should show, click "Install"
 ![Tampermonkey InstallPage](assets/install.png)
-4. Open your Twitter/X following page.
+4. The script is now installed!
+
+## Usage
+1. Open your Twitter/X following page.
 ![Following](assets/following.png)
-5. Click scan and wait!
+2. Click scan and wait!
 ![Scan](assets/scan.png)
